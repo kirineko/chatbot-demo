@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useRef, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { SendIcon, User, Bot, Settings, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { ChatMessage, generateChatResponse } from '@/lib/deepseek'
@@ -36,6 +36,30 @@ export default function Chat() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [partialResponse, setPartialResponse] = useState('')
+  
+  // 添加滚动相关的 ref
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
+
+  // 自动滚动到底部
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }
+
+  // 监听消息变化和部分响应变化，自动滚动
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, partialResponse])
+
+  // 处理输入框快捷键
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -84,33 +108,39 @@ export default function Chat() {
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto space-y-4 p-4">
-        {messages.map((message, index) => (
-          <motion.div
-            key={index}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`flex items-start gap-3 ${message.type === 'user' ? 'justify-end' : ''}`}
-          >
-            {message.type === 'bot' && (
-              <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
-                <Bot className="w-5 h-5 text-white" />
+      <div 
+        ref={chatContainerRef}
+        className="flex-1 overflow-y-auto space-y-4 p-4 scroll-smooth"
+      >
+        <AnimatePresence initial={false}>
+          {messages.map((message, index) => (
+            <motion.div
+              key={index}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className={`flex items-start gap-3 ${message.type === 'user' ? 'justify-end' : ''}`}
+            >
+              {message.type === 'bot' && (
+                <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
+                  <Bot className="w-5 h-5 text-white" />
+                </div>
+              )}
+              <div className={`max-w-[80%] rounded-lg p-4 ${
+                message.type === 'user' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-gray-800 text-gray-100'
+              }`}>
+                <MessageContent content={message.content} />
               </div>
-            )}
-            <div className={`max-w-[80%] rounded-lg p-4 ${
-              message.type === 'user' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-800 text-gray-100'
-            }`}>
-              <MessageContent content={message.content} />
-            </div>
-            {message.type === 'user' && (
-              <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">
-                <User className="w-5 h-5 text-white" />
-              </div>
-            )}
-          </motion.div>
-        ))}
+              {message.type === 'user' && (
+                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">
+                  <User className="w-5 h-5 text-white" />
+                </div>
+              )}
+            </motion.div>
+          ))}
+        </AnimatePresence>
         
         {/* 流式响应显示 */}
         {partialResponse && (
@@ -138,17 +168,21 @@ export default function Chat() {
             <span>AI 正在思考...</span>
           </motion.div>
         )}
+        
+        {/* 用于自动滚动的空白元素 */}
+        <div ref={messagesEndRef} />
       </div>
 
       <div className="border-t border-gray-700 p-4">
         <form onSubmit={handleSubmit} className="flex gap-2">
-          <input
-            type="text"
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="输入您的问题..."
-            className="flex-1 bg-gray-800 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onKeyDown={handleKeyDown}
+            placeholder="输入您的问题... (按 Enter 发送，Shift + Enter 换行)"
+            className="flex-1 bg-gray-800 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-[56px] max-h-[200px] overflow-y-auto"
             disabled={isLoading}
+            rows={1}
           />
           <button
             type="submit"
