@@ -1,13 +1,8 @@
 import OpenAI from 'openai';
 import { NextResponse } from 'next/server';
-import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-
-if (!process.env.DEEPSEEK_API_KEY) {
-  throw new Error('Missing DEEPSEEK_API_KEY environment variable');
-}
 
 const deepseek = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
+  apiKey: process.env.DEEPSEEK_API_KEY as string,
   baseURL: 'https://api.deepseek.com/v1',
 });
 
@@ -54,27 +49,15 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    console.log('Received chat request');
-    
     const { messages } = await req.json();
     
-    if (!Array.isArray(messages)) {
-      throw new Error('Invalid messages format');
-    }
-    
-    const formattedMessages: ChatCompletionMessageParam[] = [
+    const formattedMessages = [
       { role: 'system', content: SYSTEM_PROMPT },
-      ...messages.map((msg: ChatMessage) => {
-        const role = msg.type === 'user' ? 'user' : 'assistant';
-        return {
-          role,
-          content: msg.content,
-          ...(role === 'assistant' ? {} : { name: undefined })
-        } as ChatCompletionMessageParam;
-      })
+      ...messages.map((msg: ChatMessage) => ({
+        role: msg.type === 'user' ? 'user' as const : 'assistant' as const,
+        content: msg.content,
+      }))
     ];
-
-    console.log('Calling DeepSeek API');
 
     const response = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
@@ -84,58 +67,51 @@ export async function POST(req: Request) {
       stream: true,
     });
 
-    console.log('Received DeepSeek API response');
-
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          let hasContent = false;
-          for await (const chunk of response) {
-            const text = chunk.choices[0]?.delta?.content || '';
-            if (text) {
-              hasContent = true;
-              controller.enqueue(text);
-            }
-          }
-          
-          if (!hasContent) {
-            console.error('No content received from DeepSeek API');
-            controller.error(new Error('No content received'));
-            return;
-          }
-          
-          controller.close();
-        } catch (streamError: unknown) {
-          console.error('Stream processing error:', streamError);
-          controller.error(streamError);
+    // 创建一个转换流来处理文本编码
+    const textEncoder = new TextEncoder();
+    const transformStream = new TransformStream({
+      transform(chunk, controller) {
+        const text = chunk.choices[0]?.delta?.content || '';
+        if (text) {
+          // 将文本转换为 Uint8Array
+          const encoded = textEncoder.encode(text);
+          controller.enqueue(encoded);
         }
-      },
-      cancel() {
-        console.log('Stream cancelled');
       }
     });
 
-    const headers = {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-    };
+    // 将 response 通过转换流处理
+    (async () => {
+      try {
+        for await (const chunk of response) {
+          const text = chunk.choices[0]?.delta?.content || '';
+          if (text) {
+            const writer = transformStream.writable.getWriter();
+            await writer.write(chunk);
+            writer.releaseLock();
+          }
+        }
+        const writer = transformStream.writable.getWriter();
+        await writer.close();
+      } catch (error) {
+        console.error('Stream processing error:', error);
+        const writer = transformStream.writable.getWriter();
+        await writer.abort(error);
+      }
+    })();
 
-    return new NextResponse(stream, { headers });
-  } catch (error: unknown) {
-    console.error('API Error:', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined,
-      cause: error instanceof Error ? error.cause : undefined,
-    });
-
-    return NextResponse.json(
-      { 
-        error: '处理请求时出错',
-        details: process.env.NODE_ENV === 'development' && error instanceof Error 
-          ? error.message 
-          : undefined 
+    return new NextResponse(transformStream.readable, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+        'Connection': 'keep-alive',
+        'Cache-Control': 'no-cache, no-transform',
       },
+    });
+  } catch (error) {
+    console.error('API Error:', error);
+    return NextResponse.json(
+      { error: '处理请求时出错' },
       { status: 500 }
     );
   }

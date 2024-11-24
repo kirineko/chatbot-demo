@@ -7,16 +7,17 @@
   },
   "headers": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/chat",
       "headers": [
         {
+          "key": "Connection",
+          "value": "keep-alive"
+        },
+        {
           "key": "Cache-Control",
-          "value": "no-store, no-cache, must-revalidate"
+          "value": "no-cache, no-transform"
         }
       ]
     }
-  ],
-  "env": {
-    "DEEPSEEK_API_KEY": "@deepseek_api_key"
-  }
+  ]
 }
