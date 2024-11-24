@@ -39,13 +39,18 @@ const SYSTEM_PROMPT = `你是一位专业的编程导师，主要面向大学生
 
 请记住：你的目标是不仅要解答问题，更要激发学生的学习兴趣和思考能力。`;
 
+interface ChatMessage {
+  type: 'user' | 'bot';
+  content: string;
+}
+
 export async function POST(req: Request) {
   try {
     const { messages } = await req.json();
     
     const formattedMessages = [
       { role: 'system', content: SYSTEM_PROMPT },
-      ...messages.map((msg: any) => ({
+      ...messages.map((msg: ChatMessage) => ({
         role: msg.type === 'user' ? 'user' as const : 'assistant' as const,
         content: msg.content,
       }))

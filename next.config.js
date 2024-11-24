@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  webpack: (config, { isServer }) => {
-    // 防止 webpack 打包 punycode
+  webpack: (config) => {
+    // 禁用 punycode
     config.resolve.alias = {
       ...config.resolve.alias,
       punycode: false,
