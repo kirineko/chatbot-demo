@@ -1,8 +1,13 @@
 import OpenAI from 'openai';
 import { NextResponse } from 'next/server';
+import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+
+if (!process.env.DEEPSEEK_API_KEY) {
+  throw new Error('Missing DEEPSEEK_API_KEY environment variable');
+}
 
 const deepseek = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY as string,
+  apiKey: process.env.DEEPSEEK_API_KEY,
   baseURL: 'https://api.deepseek.com/v1',
 });
 
@@ -49,15 +54,27 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
+    console.log('Received chat request');
+    
     const { messages } = await req.json();
     
-    const formattedMessages = [
+    if (!Array.isArray(messages)) {
+      throw new Error('Invalid messages format');
+    }
+    
+    const formattedMessages: ChatCompletionMessageParam[] = [
       { role: 'system', content: SYSTEM_PROMPT },
-      ...messages.map((msg: ChatMessage) => ({
-        role: msg.type === 'user' ? 'user' as const : 'assistant' as const,
-        content: msg.content,
-      }))
+      ...messages.map((msg: ChatMessage) => {
+        const role = msg.type === 'user' ? 'user' : 'assistant';
+        return {
+          role,
+          content: msg.content,
+          ...(role === 'assistant' ? {} : { name: undefined })
+        } as ChatCompletionMessageParam;
+      })
     ];
+
+    console.log('Calling DeepSeek API');
 
     const response = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
@@ -67,39 +84,58 @@ export async function POST(req: Request) {
       stream: true,
     });
 
-    // 创建一个可读流来处理响应
+    console.log('Received DeepSeek API response');
+
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          let hasContent = false;
           for await (const chunk of response) {
             const text = chunk.choices[0]?.delta?.content || '';
-            controller.enqueue(text);
+            if (text) {
+              hasContent = true;
+              controller.enqueue(text);
+            }
           }
+          
+          if (!hasContent) {
+            console.error('No content received from DeepSeek API');
+            controller.error(new Error('No content received'));
+            return;
+          }
+          
           controller.close();
-        } catch (error) {
-          console.error('Stream processing error:', error);
-          controller.error(error);
+        } catch (streamError: unknown) {
+          console.error('Stream processing error:', streamError);
+          controller.error(streamError);
         }
       },
       cancel() {
-        // 清理资源
         console.log('Stream cancelled');
       }
     });
 
-    // 设置响应头以保持连接
-    return new NextResponse(stream, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Transfer-Encoding': 'chunked',
-        'Connection': 'keep-alive',
-        'Cache-Control': 'no-cache, no-transform',
-      },
+    const headers = {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+    };
+
+    return new NextResponse(stream, { headers });
+  } catch (error: unknown) {
+    console.error('API Error:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      cause: error instanceof Error ? error.cause : undefined,
     });
-  } catch (error) {
-    console.error('API Error:', error);
+
     return NextResponse.json(
-      { error: '处理请求时出错' },
+      { 
+        error: '处理请求时出错',
+        details: process.env.NODE_ENV === 'development' && error instanceof Error 
+          ? error.message 
+          : undefined 
+      },
       { status: 500 }
     );
   }
