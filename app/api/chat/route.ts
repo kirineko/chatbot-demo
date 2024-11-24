@@ -44,6 +44,9 @@ interface ChatMessage {
   content: string;
 }
 
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   try {
     const { messages } = await req.json();
@@ -60,23 +63,39 @@ export async function POST(req: Request) {
       model: 'deepseek-chat',
       messages: formattedMessages,
       temperature: 0.7,
-      max_tokens: 2000,
+      max_tokens: 4000,
       stream: true,
     });
 
     // 创建一个可读流来处理响应
     const stream = new ReadableStream({
       async start(controller) {
-        for await (const chunk of response) {
-          const text = chunk.choices[0]?.delta?.content || '';
-          controller.enqueue(text);
+        try {
+          for await (const chunk of response) {
+            const text = chunk.choices[0]?.delta?.content || '';
+            controller.enqueue(text);
+          }
+          controller.close();
+        } catch (error) {
+          console.error('Stream processing error:', error);
+          controller.error(error);
         }
-        controller.close();
       },
+      cancel() {
+        // 清理资源
+        console.log('Stream cancelled');
+      }
     });
 
-    // 返回流式响应
-    return new NextResponse(stream);
+    // 设置响应头以保持连接
+    return new NextResponse(stream, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+        'Connection': 'keep-alive',
+        'Cache-Control': 'no-cache, no-transform',
+      },
+    });
   } catch (error) {
     console.error('API Error:', error);
     return NextResponse.json(

@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   webpack: (config) => {
-    // 禁用 punycode
     config.resolve.alias = {
       ...config.resolve.alias,
       punycode: false,

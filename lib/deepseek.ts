@@ -14,12 +14,11 @@ export async function generateChatResponse(messages: ChatMessage[]) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || '请求失败');
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
 
     if (!response.body) {
-      throw new Error('没有响应数据');
+      throw new Error('No response body');
     }
 
     const reader = response.body.getReader();
@@ -28,16 +27,34 @@ export async function generateChatResponse(messages: ChatMessage[]) {
     return {
       async *[Symbol.asyncIterator]() {
         try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
+          let reading = true;
+          while (reading) {
+            try {
+              const result = await Promise.race([
+                reader.read(),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Response timeout')), 30000)
+                )
+              ]) as ReadableStreamReadResult<Uint8Array>;
+
+              if (result.done) {
+                reading = false;
+                break;
+              }
+
+              const chunk = decoder.decode(result.value, { stream: true });
+              if (chunk) {
+                yield chunk;
+              }
+            } catch (error) {
+              console.error('Chunk reading error:', error);
+              reading = false;
               break;
             }
-            const chunk = decoder.decode(value, { stream: true });
-            if (chunk) {
-              yield chunk;
-            }
           }
+        } catch (error) {
+          console.error('Stream reading error:', error);
+          throw error;
         } finally {
           reader.releaseLock();
         }
