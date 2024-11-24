@@ -64,6 +64,7 @@ export async function POST(req: Request) {
       stream: true,
     });
 
+    // 创建一个可读流来处理响应
     const stream = new ReadableStream({
       async start(controller) {
         for await (const chunk of response) {
@@ -74,6 +75,7 @@ export async function POST(req: Request) {
       },
     });
 
+    // 返回流式响应
     return new NextResponse(stream);
   } catch (error) {
     console.error('API Error:', error);

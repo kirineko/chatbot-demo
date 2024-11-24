@@ -14,11 +14,12 @@ export async function generateChatResponse(messages: ChatMessage[]) {
     });
 
     if (!response.ok) {
-      throw new Error('API request failed');
+      const error = await response.json();
+      throw new Error(error.message || '请求失败');
     }
 
     if (!response.body) {
-      throw new Error('No response body');
+      throw new Error('没有响应数据');
     }
 
     const reader = response.body.getReader();
@@ -26,12 +27,21 @@ export async function generateChatResponse(messages: ChatMessage[]) {
 
     return {
       async *[Symbol.asyncIterator]() {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          yield decoder.decode(value);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+            const chunk = decoder.decode(value, { stream: true });
+            if (chunk) {
+              yield chunk;
+            }
+          }
+        } finally {
+          reader.releaseLock();
         }
-      },
+      }
     };
   } catch (error) {
     console.error('Chat API Error:', error);
